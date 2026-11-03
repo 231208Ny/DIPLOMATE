@@ -257,6 +257,7 @@ function App() {
   const [compareA, setCompareA] = useState("Indonesia");
   const [compareB, setCompareB] = useState("Türkiye");
   const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
   const [chatSessions, setChatSessions] = useState([
     {
       id: 1,
@@ -565,19 +566,47 @@ function App() {
     return "That's an interesting question! Try asking me about diplomacy, ASEAN, the United Nations, MUN, human rights, climate change, or international peace and security.";
   }
 
-  function sendMessage(text = chatInput) {
-    if (!text.trim()) return;
-    const question = text.trim();
+  async function sendMessage(text = chatInput) {
+    const question = String(text || "").trim();
+    if (!question || chatLoading) return;
+
+    const chatId = activeChatId;
+    setChatLoading(true);
+    setChatInput("");
     setChatSessions((previous) => previous.map((chat) =>
-      chat.id === activeChatId
+      chat.id === chatId
         ? {
             ...chat,
             title: chat.messages.length <= 1 ? question.slice(0, 34) : chat.title,
-            messages: [...chat.messages, { from: "user", text: question }, { from: "bot", text: getAssistantReply(question) }]
+            messages: [...chat.messages, { from: "user", text: question }]
           }
         : chat
     ));
-    setChatInput("");
+
+    try {
+      const apiResponse = await fetch("/api/assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: question })
+      });
+      const data = await apiResponse.json();
+      if (!apiResponse.ok || !data.success || !data.reply) {
+        throw new Error(data.error || "The assistant could not process that question.");
+      }
+      setChatSessions((previous) => previous.map((chat) =>
+        chat.id === chatId
+          ? { ...chat, messages: [...chat.messages, { from: "bot", text: data.reply }] }
+          : chat
+      ));
+    } catch (error) {
+      setChatSessions((previous) => previous.map((chat) =>
+        chat.id === chatId
+          ? { ...chat, messages: [...chat.messages, { from: "bot", text: `${getAssistantReply(question)}\n\n(Connection note: the online assistant endpoint is unavailable, so this is an offline sample response.)` }] }
+          : chat
+      ));
+    } finally {
+      setChatLoading(false);
+    }
   }
 
   function startNewChat() {
@@ -1077,10 +1106,11 @@ Thank you, Honourable Chair.`;
                       {message.text}
                     </div>
                   ))}
+                  {chatLoading && <div className="message bot">Thinking about your question...</div>}
                 </div>
                 <div className="chat-form">
-                  <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendMessage()} placeholder="Ask a question about global affairs..." aria-label="Type your question" />
-                  <button onClick={() => sendMessage()}>Send</button>
+                  <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendMessage()} placeholder="Ask a question about global affairs..." aria-label="Type your question" disabled={chatLoading} />
+                  <button onClick={() => sendMessage()} disabled={chatLoading || !chatInput.trim()}>{chatLoading ? "Thinking..." : "Send"}</button>
                 </div>
                 <p className="muted" style={{ fontSize: 11 }}>Press Enter or select Send to submit your question.</p>
               </div>
